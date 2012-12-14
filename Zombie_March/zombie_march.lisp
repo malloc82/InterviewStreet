@@ -53,12 +53,37 @@
                (format t "    [exptected : ~a]~%~%" (float [value :expected])))
            table))
 
-(defun expectations (node)
-  (loop
-     :for key :being the :hash-key of [node :neighbors] :using (hash-value value)
-     :if (< value 1) :collect value :into possible
-     :else :if (= value 1) :sum 1 :into absolute
-     :finally (setf [node :expected] (+ absolute (mean (probabilities possible))))))
+(defun calc-expectations (table)
+  (maphash #'(lambda (key node)
+               (declare (ignore key))
+               (loop
+                  :for n :being the :hash-key of [node :neighbors] :using (hash-value likely-hood)
+                  :if (< likely-hood 1)
+                      :append (loop for i from 1 to (floor [[table n] :zombies]) collect likely-hood)
+                      :into possibilities
+                  :else :if (= likely-hood 1) :sum 1 :into absolute
+                  :unless (= [[table n] :zombies] (floor [[table n] :zombies]))
+                      :collect (multiple-value-bind (must maybe)
+                                   (truncate [[table n] :zombies])
+                                 (* maybe likely-hood)) :into possibilities
+                  :finally (setf [node :expected] (+ absolute (mean (probabilities possibilities))))))
+           table))
+
+(defun calc-expectations (table)
+  (maphash #'(lambda (key node)
+               (declare (ignore key))
+               (loop
+                  :with possibilities = '() and absolute = 0
+                  :for n :being the :hash-key of [node :neighbors] :using (hash-value likely-hood)
+                  :do (multiple-value-bind (whole partial)
+                          (truncate [[table n] :zombies])
+                        (if (< likely-hood 1)
+                            (loop :for i from 1 to whole :do (push likely-hood possibilities))
+                            (incf absolute whole))
+                        (when (> partial 0)
+                          (push (* partial likely-hood) possibilities)))
+                  :finally (setf [node :expected] (+ absolute (mean (probabilities possibilities))))))
+           table))
 
 (defun mean (samples_list)
   (loop :for sample :in samples_list sum (* (car sample) (cdr sample))))
@@ -74,7 +99,6 @@
                (t (+ (* (first samples) (P (cdr samples) (- positive 1)))
                      (* (- 1 (first samples)) (P (cdr samples) positive)))))))
     (loop :for i from 0 to (length sample_list) collect `(,i . ,(P sample_list i)))))
-
 
 (defun read-data (input-stream)
   (destructuring-bind (nodes edges steps)
@@ -101,21 +125,41 @@
                           :do (setf [[[table i] :neighbors] key]
                                     (/ 1 (hash-table-count [value :neighbors])))))
                    table)
+
           ;; calculate exptected zombies for next round
-          (maphash #'(lambda (key value)
-                       (declare (ignore key))
-                       (expectations value))
-                   table)
+          (calc-expectations table)
+
           (format t "~%Table~%")
-          (print-table    table)
           table)))
+
+(defun simulate (table ntimes)
+  (dotimes (i ntimes table)
+    (let ((diff 0))
+      (maphash #'(lambda (key node)
+                   (declare (ignore key))
+                   (incf diff (abs (- [node :expected] [node :zombies])))
+                   (setf [node :zombies] (float [node :expected])))
+               table)
+      (calc-expectations table)
+      (format t "i = ~a, diff = ~a~%" i diff)
+      (when (< diff 0.1)
+        (format t "Stopped at ~a, diff = ~a~%" i diff)
+        (return table)))))
 
 (defun main (filename)
   (with-open-file (in filename :direction :input)
     ;; ignore the first line for now
     (do ((test-count (read-from-string (read-line in nil))
-                     (decf test-count)))
-        ((= test-count 0))
+                     (decf test-count))
+         (table '()))
+        ((= test-count 0) table)
       (declare (integer test-count))
-      (print-table (read-data in))
-      )))
+      (push (read-data in) table)
+      (print-table (first table))
+      (format t "Total : ~a~%" (loop :for value being the hash-value of (first table)
+                                    :sum [value :expected]))
+      (simulate (first table) 100)
+      (format t "-------------------------------------------------~%")
+      (print-table (first table))
+      (format t "Total : ~a~%" (loop :for value being the hash-value of (first table)
+                                    :sum [value :expected])))))
