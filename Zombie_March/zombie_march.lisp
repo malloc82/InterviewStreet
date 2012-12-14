@@ -8,24 +8,26 @@
                                `(gethash ,h-key ,h-table))))
 (set-macro-character #\] (get-macro-character #\) ))
 
-(set-macro-character #\{ #'(lambda (stream macro-char)
-                             (declare (ignore macro-char))
-                             (let ((pairs (read-delimited-list #\} stream t))
-                                   (h (make-hash-table :test 'equal)))
-                               (loop :for (key value) on pairs by #'cddr
-                                  :do (setf (gethash key h) value))
-                               h)))
-(set-macro-character #\} (get-macro-character #\) ))
-
-;; (defun {} (&rest pairs)
+;; (defun new-hash-table (&rest pairs)
 ;;   (let ((h (make-hash-table :test 'equal)))
 ;;     (loop for (key value) on pairs by #'cddr do (setf (gethash key h) value))
 ;;     h))
 
-;; (defmacro [] (h-table key)
-;;   (let ((k key)
-;;         (table h-table))
-;;     `(gethash ,k ,table)))
+(set-macro-character #\{ #'(lambda (stream macro-char)
+                             (declare (ignore macro-char))
+                             (let ((pairs (read-delimited-list #\} stream t)))
+                               `(let ((h (make-hash-table :test 'equal)))
+                                  (loop :for (key value) :on (list ,@pairs) :by #'cddr
+                                     :do (setf (gethash key h) value))
+                                  h))))
+(set-macro-character #\} (get-macro-character #\) ))
+
+(defun hash-table-print (table)
+  (loop
+     :initially (format t "{")
+     :for key :being the :hash-key of table :using (hash-value value)
+     :do (format t "~a:~a, " key value)
+     :finally (format t "}")))
 
 (defun read-numbers-from-string (line)
   (when (> (length line) 0)
@@ -40,45 +42,23 @@
             (return (nreverse numbers)))))))
 
 (defun print-table (table)
-  (expectations table)
-  (loop :for key :being the :hash-key of table :using (hash-value value)
-     :do (progn
-           (format t "~a  :  " key)
-           (format t "zombies : ~a " (getf value :zombies))
-           (format t "neighbors : ~a~%" (getf value :neighbors))
-           (format t "      absolute : ~a~%" (getf value :absolute))
-           (format t "      expected : ~a, ~a~%" (getf value :expected) (float (getf value :expected)))
-           (format t "      samples  : ~a~%" (getf value :samples))
-           ;; (format t "      channels : ~%")
-           ;; (loop :for k :being the :hash-key of (getf value :channel) :using (hash-value v)
-           ;;    :do (format t "            [~a : ~a] ~%" k v))
-           (format t "~%")
-           )))
+  (maphash #'(lambda (key value)
+               (format t "~a : " key)
+               (format t "[zombies   : ~a]~%" [value :zombies])
+               (loop
+                  :initially (format t "    [neighbors : ")
+                  :for k :being the :hash-key of [value :neighbors] :using (hash-value v)
+                  :do (format t "~a:~a, " k v)
+                  :finally (format t "]~%"))
+               (format t "    [exptected : ~a]~%~%" (float [value :expected])))
+           table))
 
-(defun setup-channels (table)
+(defun expectations (node)
   (loop
-     :for key :being the :hash-key of table :using (hash-value value)
-     :do (symbol-macrolet ((neighbors (getf value :Neighbors))
-                           (zombies   (getf value :zombies)))
-           (loop :with count = (length neighbors)
-              :for n :in neighbors
-              :do (symbol-macrolet ((channel (getf [table n] :channel)))
-                    (unless channel
-                      (setf channel {})
-                      (setf [channel :count] 0)
-                      (setf (getf [table n] :absolute) 0)) 
-                    (dotimes (i zombies)
-                      (push (/ 1 count) [channel key])
-                      (incf [channel :count])
-                      (if (= count 1)
-                          (incf (getf [table n] :absolute))
-                          (push (/ 1 count) (getf [table n] :samples)))))))))
-
-(defun expectations (table)
-  (loop :for key :being the :hash-key of table
-     :do (setf (getf [table key] :expected)
-               (+ (mean (probabilities (getf [table key] :samples)))
-                  (getf [table key] :absolute)))))
+     :for key :being the :hash-key of [node :neighbors] :using (hash-value value)
+     :if (< value 1) :collect value :into possible
+     :else :if (= value 1) :sum 1 :into absolute
+     :finally (setf [node :expected] (+ absolute (mean (probabilities possible))))))
 
 (defun mean (samples_list)
   (loop :for sample :in samples_list sum (* (car sample) (cdr sample))))
@@ -96,32 +76,46 @@
     (loop :for i from 0 to (length sample_list) collect `(,i . ,(P sample_list i)))))
 
 
-(defun get-input (filename)
+(defun read-data (input-stream)
+  (destructuring-bind (nodes edges steps)
+          (read-numbers-from-string (read-line input-stream nil))
+        (let ((table (make-hash-table :test #'equal :size nodes)))
+          (format t "~%nodes=~a~%edges=~a~%steps=~a~%" nodes edges steps)
+          (dotimes (i nodes) (setf [table i] {:zombies 0 :neighbors {} :expected 0}))
+
+          ;; get edges
+          (do ((counter 1 (incf counter)))
+              ((> counter edges))
+            (let ((pair (read-numbers-from-string (read-line input-stream nil))))
+              (setf [[[table (first pair)]  :neighbors] (second pair)] 0)
+              (setf [[[table (second pair)] :neighbors] (first pair)]  0)))
+
+          ;; get nodes
+          (do ((counter 0 (incf counter)))
+              ((>= counter nodes))
+            (setf [[table counter] :zombies] (read-from-string (read-line input-stream nil))))
+
+          ;; update table
+          (maphash #'(lambda (key value)
+                       (loop :for i :being the :hash-key of [value :neighbors]
+                          :do (setf [[[table i] :neighbors] key]
+                                    (/ 1 (hash-table-count [value :neighbors])))))
+                   table)
+          ;; calculate exptected zombies for next round
+          (maphash #'(lambda (key value)
+                       (declare (ignore key))
+                       (expectations value))
+                   table)
+          (format t "~%Table~%")
+          (print-table    table)
+          table)))
+
+(defun main (filename)
   (with-open-file (in filename :direction :input)
     ;; ignore the first line for now
     (do ((test-count (read-from-string (read-line in nil))
                      (decf test-count)))
         ((= test-count 0))
-      (destructuring-bind (nodes roads steps)
-          (read-numbers-from-string (read-line in nil))
-        (let ((junctions (make-hash-table :test #'equal :size nodes)))
-          (format t "~%nodes=~a~%roads=~a~%steps=~a~%" nodes roads steps)
-          ;; (print "edges:")
-          (do ((counter 1 (incf counter)))
-              ((> counter roads))
-            (let ((pair (read-numbers-from-string (read-line in nil))))
-              ;;(print pair)
-              (push (second pair) (getf [junctions (first pair)]  :Neighbors))
-              (push (first pair)  (getf [junctions (second pair)] :Neighbors))))
-
-          ;; (princ "vertices:")
-          (do ((counter 0 (incf counter)))
-              ((>= counter nodes))
-            (setf (getf [junctions counter] :zombies)
-                  (read-from-string (read-line in nil))))
-
-          (format t "~%Table~%")
-          (setup-channels junctions)
-          (print-table    junctions)
-          (print (loop :for key being the hash-key of junctions using (hash-value value)
-                    :sum (+ (getf value :expected) (getf value :absolute)))))))))
+      (declare (integer test-count))
+      (print-table (read-data in))
+      )))
