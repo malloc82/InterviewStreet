@@ -22,7 +22,7 @@
 (defun print-ht (table)
   (loop
      :initially (format t "{")
-     :for key :being the :hash-key of table :using (hash-value value)
+     :for key :being the :hash-keys of table :using (hash-value value)
      :for i :from 1
      :do (format t "~a:~a, " key value)
      :if (= (mod i 8) 0) :do (format t "~%")
@@ -47,7 +47,7 @@
                (loop
                   :initially (format t "~6,0T neighbors :~19,0T")
                   :for i :from 0
-                  :for k :being the :hash-key of [value :neighbors] :using (hash-value v)
+                  :for k :being the :hash-keys of [value :neighbors] :using (hash-value v)
                   :if (and (/= i 0)
                            (= (mod i 6) 0)) :do (format t "~%~19,0T")
                   :do (format t "~2,,,@a:~9,,,a " k v)
@@ -71,7 +71,7 @@
                   :while more
                   :do (loop
                          :initially (setf more nil)
-                         :for neighbor :being the :hash-key of [node :neighbors]
+                         :for neighbor :being the :hash-keys of [node :neighbors]
                          :using (hash-value likely-hood)
                          :unless (= (first likely-hood) 0)
                          :do  (if (= (second likely-hood) 1)
@@ -95,6 +95,15 @@
                                                                     possibilities)))))))
            table))
 
+(defun calc-expectations2 (table)
+  (maphash #'(lambda (key node)
+               (declare (ignore key))
+               (setf [node :expected]
+                     (loop
+                        :for incoming being the :hash-value of [node :neighbors]
+                        :sum (* (first incoming) (second incoming)))))
+           table))
+
 (defvar *p-lookup-table* (make-hash-table :test #'equal))
 
 (defun mean (samples_list)
@@ -113,6 +122,32 @@
                            (t (+ (* (first samples) (P (cdr samples) (- positive 1)))
                                  (* (- 1 (first samples)) (P (cdr samples) positive))))))))))
     (loop :for i from 0 to (length sample_list) collect `(,i . ,(P sample_list i)))))
+
+(defvar *p-tree* nil)
+(defvar *p-tree-nodes* (make-hash-table :test #'equal))
+(defvar *factorial-cache* (make-hash-table :test #'equal))
+
+(defun probabilities2 (sample_list)
+  (loop
+     :with X = 1 and P = 1 and x_i = 1
+     ;; :for x_i from 1 to (length sample_list)
+     :for p_i in sample_list
+     ;; :sum x_i into n
+     :do (setq X (* X (factorial x_i)))
+     :do (setq P (* P (expt p_i x_i)))
+     :finally (progn
+                (format *query-io* "X = ~a~%" X)
+                (format *query-io* "P = ~a~%" P)
+                (return (* (/ (factorial (length sample_list)) 1) P)))))
+
+(defun factorial (n)
+  (declare (integer n))
+  (if [*factorial-cache* n]
+      [*factorial-cache* n]
+      (setf [*factorial-cache* n]
+            (if (= n 0)
+                1
+                (* n (factorial (- n 1)))))))
 
 (defun process-data (input-stream)
   (destructuring-bind (nodes edges steps)
@@ -135,30 +170,33 @@
 
       ;; update table
       (maphash #'(lambda (key value)
-                   (loop :for i :being the :hash-key of [value :neighbors]
+                   (loop :for i :being the :hash-keys of [value :neighbors]
                       :do (setf [[[table i] :neighbors] key]
                                 (list [value :zombies]
                                       (/ 1 (hash-table-count [value :neighbors]))))))
                table)
 
+      (print-table table)
+      
       ;; run simulation
       (simulate table steps)
       
       ;; print result
       (destructuring-bind (a1 a2 a3 a4 a5)
-          (map 'list #'round (subseq (q-sort (loop :for key :being the :hash-key of table
+          (map 'list #'round (subseq (q-sort (loop :for key :being the :hash-keys of table
                                                 :using (hash-value node)
                                                 :collect [node :expected])) 0 5))
-        (format t "~a ~a ~a ~a ~a~%" a1 a2 a3 a4 a5)))))
+        (format *standard-output* "~a ~a ~a ~a ~a~%" a1 a2 a3 a4 a5)
+        (force-output *standard-output*)))))
 
 (defun simulate (table ntimes)
   (dotimes (i ntimes table)
     (let ((diffs '()))
-      (calc-expectations table)
+      (calc-expectations2 table)
       (maphash #'(lambda (node content)
                    ;; (declare (ignore node))
                    (push (abs (- [content :expected] [content :zombies])) diffs)
-                   (setf [content :zombies] (float [content :expected]))
+                   (setf [content :zombies] [content :expected])
                    (maphash #'(lambda (neighbor p)
                                 (declare (ignore p))
                                 (setf (first [[[table neighbor] :neighbors] node])
