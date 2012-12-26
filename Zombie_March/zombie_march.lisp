@@ -79,9 +79,9 @@
 (defun process-data (input-stream)
   (destructuring-bind (nodes edges steps)
       (read-numbers-from-string (read-line input-stream nil))
-    (declare (ignore steps))
+    ;; (declare (ignore steps))
     (let ((table      (make-array `(,nodes ,nodes) :element-type 'ratio :initial-element 0))
-          (zombies    (make-array nodes :element-type 'ratio :initial-element 0)))
+          (zombies    (make-array `(,nodes 1) :element-type 'ratio :initial-element 0)))
 
       ;; get edges
       (do ((counter 1 (incf counter)))
@@ -106,11 +106,11 @@
               (setf (aref table i r) (/ 1 neighbors-count))))))
 
       (print-table table)
-      (setq table (array-multiply table (array-multiply table (array-multiply table table))))
+      ;; (setq table (array-multiply table (array-multiply table (array-multiply table table))))
       
       ;; run simulation
-      (simulate table steps)
-      
+      (print-table (simulate table zombies steps))
+
       ;; print result
       ;; (destructuring-bind (a1 a2 a3 a4 a5)
       ;;     (map 'list #'round (subseq (q-sort (loop :for key :being the :hash-keys of table
@@ -149,23 +149,27 @@
         (aref result 0 0)
         result)))
 
+(defun max-diffs (a b)
+  (declare (type (simple-array) a b))
+  (let ((dimensions (array-dimensions a))
+        (mdiffs 0))
+    (dotimes (r (first dimensions) mdiffs)
+      (dotimes (c (second dimensions))
+        (let ((diff (abs (- (aref a r c) (aref b r c)))))
+        (when (>  diff mdiffs)
+          (setf mdiffs diff)))))))
+
 (defun simulate (table zombies ntimes)
   (declare (type (simple-array) zombies)
            (type (simple-array) table)
            (integer ntimes))
   (dotimes (i ntimes zombies)
     (declare (integer i))
-    (let ((diffs '())
-          (next-round (array-multiply table zombies)))
-      (declare (list diffs))
-      (if )
-      (calc-expectations table)
-      (maphash #'(lambda (node content)
-                   (declare (ignore node))
-                   (push (abs (- [content :expected] [content :zombies])) diffs)
-                   (setf [content :zombies] [content :expected]))
-               table)
-      (when (< (reduce #'max diffs) 1/10) (return))))))
+    (let ((next-round (array-multiply table zombies)))
+      (declare (type (simple-array) next-round))
+      (when (< (max-diffs next-round zombies) 1/10)
+        (return next-round))
+      (setq zombies next-round))))
 
 (defun main ()
   (do ((test-count (read-from-string (read-line *standard-input* nil))
