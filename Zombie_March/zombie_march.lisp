@@ -40,17 +40,17 @@
     (declare (integer rows cols))
 
     (format *standard-output* "~%~6,0T")
-    (dotimes (r rows)
+    (dotimes (r cols)
       (format *standard-output* "~4,,,@a " r))
     (format *standard-output* "~%~6,0T")
-    (dotimes (r rows)
+    (dotimes (r cols)
       (format *standard-output* "~4,,,@a " "----"))
     (format *standard-output* "~%")
 
     (dotimes (r rows)
       (format *standard-output* "~3,,,@a : ~6,0T" r)
       (dotimes (c cols)
-        (format *standard-output* "~4,,,@a " (aref table r c)))
+        (format *standard-output* "~4,,,@a " (round (aref table r c))))
       (format *standard-output* "~%"))
     (format *standard-output* "~%")))
 
@@ -76,6 +76,60 @@
                 (remove-if-not #'(lambda (x) (= x pivot)) data)
                 (q-sort (remove-if-not #'(lambda (x) (< x pivot)) data))))))
 
+(defun qsort-vec (data &key (limit 0))
+  (labels ((rec (start end)
+             (when (> (- end start) 1)
+               (loop :with pivot = start
+                  :for ptr from (+ start 1) to (- end 1)
+                  :do (when (<= (aref data pivot) (aref data ptr))
+                        (when (> (- ptr pivot) 1)
+                          (rotatef (aref data (+ pivot 1)) (aref data pivot)))
+                        (rotatef (aref data pivot) (aref data ptr))
+                        (incf pivot))
+                  :finally (progn
+                             (rec start pivot)
+                             (rec (+ pivot 1) end)))))
+           (rec-limit (start end limit)
+             (when (> (- end start) 1)
+               (loop :with pivot = start and count = 0
+                  :for ptr from (+ start 1) to (- end 1)
+                  :do (when (<= (aref data pivot) (aref data ptr))
+                        (when (> (- ptr pivot) 1)
+                          (rotatef (aref data (+ pivot 1)) (aref data pivot)))
+                        (rotatef (aref data pivot) (aref data ptr))
+                        (incf pivot)
+                        (incf count))
+                  :finally (if (>= count limit)
+                             (rec-limit start pivot limit)
+                             (progn
+                               (rec-limit start pivot count)
+                               (rec-limit (+ pivot 1) end (- limit count 1))))))))
+    (if (> limit 0)
+        (rec-limit 0 (length data) limit)
+        (rec 0 (length data)))))
+
+(defun qsort-colvec (data &key (limit 0))
+  (labels ((rec-nx1 (start end limit)
+             (when (> (- end start) 1)
+               (loop :with pivot = start and count = 0
+                  :for ptr from (+ start 1) to (- end 1)
+                  :do (when (<= (aref data pivot 0) (aref data ptr 0))
+                        (when (> (- ptr pivot) 1)
+                          (rotatef (aref data (+ pivot 1) 0) (aref data pivot 0)))
+                        (rotatef (aref data pivot 0) (aref data ptr 0))
+                        (incf pivot)
+                        (incf count))
+                  :finally (if (>= count limit)
+                             (rec-nx1 start pivot limit)
+                             (progn
+                               (rec-nx1 start pivot count)
+                               (rec-nx1 (+ pivot 1) end (- limit count 1))))))))
+    (let ((dimension (array-dimensions data)))
+      (if (> limit 0)
+          (rec-nx1 0 (first dimension) limit)
+          (rec-nx1 0 (first dimension) (first dimension))
+          ))))
+
 (defun process-data (input-stream)
   (destructuring-bind (nodes edges steps)
       (read-numbers-from-string (read-line input-stream nil))
@@ -93,7 +147,7 @@
       ;; get nodes
       (do ((index 0 (incf index)))
           ((>= index nodes))
-        (setf (aref zombies index) (read-from-string (read-line input-stream nil))))
+        (setf (aref zombies index 0) (read-from-string (read-line input-stream nil))))
 
       ;; update table
       (dotimes (r nodes)
@@ -105,11 +159,18 @@
             (when (> (aref table i r) 0)
               (setf (aref table i r) (/ 1 neighbors-count))))))
 
-      (print-table table)
+      ;; (print-table table)
       ;; (setq table (array-multiply table (array-multiply table (array-multiply table table))))
       
       ;; run simulation
-      (print-table (simulate table zombies steps))
+      (let ((result (simulate table zombies steps)))
+        (qsort-colvec result :limit 5)
+        (format *standard-output* "~a ~a ~a ~a ~a~%"
+                (round (aref result 0 0))
+                (round (aref result 1 0))
+                (round (aref result 2 0))
+                (round (aref result 3 0))
+                (round (aref result 4 0))))
 
       ;; print result
       ;; (destructuring-bind (a1 a2 a3 a4 a5)
