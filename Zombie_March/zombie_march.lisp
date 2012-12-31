@@ -1,5 +1,7 @@
 ;; Author : Ritchie Cai
 ;; Date   : 2012-12-04
+;; Enter your code here. Read input from STDIN. Print output to STDOUT
+
 (eval-when (:compile-toplevel :load-toplevel :execute) 
   (set-macro-character #\[ #'(lambda (stream macro-char)
                                (declare (ignore macro-char))
@@ -73,6 +75,7 @@
   (destructuring-bind (nodes edges steps)
       (read-numbers-from-string (read-line input-stream nil))
     (let ((table (make-hash-table :test #'equal :size nodes)))
+      ;; (format t "~%nodes=~a~%edges=~a~%steps=~a~%" nodes edges steps)
       (dotimes (i nodes) (setf [table i] (list () 0 0)))
 
       ;; get edges
@@ -105,7 +108,9 @@
                                                 :using (hash-value node)
                                                 :collect (expected node))) 0 5))
         (format *standard-output* "~a ~a ~a ~a ~a~%" a1 a2 a3 a4 a5)
-        (force-output *standard-output*)))))
+        (force-output *standard-output*))
+      ;; (format *standard-output* "~a ~a ~a ~a ~a~%" 1 2 3 4 5)
+      )))
 
 (defun calc-expectations (table)
   (declare (hash-table table))
@@ -135,11 +140,3 @@
       ((= test-count 0))
     (declare (integer test-count))
     (process-data *standard-input*)))
-
-(defun test (filename)
-  (with-open-file (in filename :direction :input)
-    (do ((test-count (read-from-string (read-line in nil))
-                     (decf test-count)))
-        ((= test-count 0))
-      (declare (integer test-count))
-      (process-data in))))
