@@ -29,17 +29,17 @@
 (defun print-table (table)
   (maphash #'(lambda (key value)
                (format t "~2,,,@a~4,0T: " key)
-               (format t " zombies   : ~2,,,@a~%" [value :zombies])
+               (format t " zombies   : ~2,,,@a~%" (zombies value))
                (loop
                   :initially (format t "~6,0T neighbors :~19,0T")
                   :for i :from 0
                   ;; :for k :being the :hash-keys of [value :neighbors] :using (hash-value v)
-                  :for k :in [value :neighbors]
+                  :for k :in (neighbors value)
                   :if (and (/= i 0)
                            (= (mod i 9) 0)) :do (format t "~%~19,0T")
                   :do (format t "~2,,,@a:~4,,,a " (first k) (second k))
                   :finally (format t "~%"))
-               (format t "~6,0T exptected : ~a~2&" (float [value :expected])))
+               (format t "~6,0T exptected : ~a~2&" (float (expected value))))
            table))
 
 (defun read-numbers-from-string (line)
@@ -64,32 +64,36 @@
                 (remove-if-not #'(lambda (x) (= x pivot)) data)
                 (q-sort (remove-if-not #'(lambda (x) (< x pivot)) data))))))
 
+(defmacro neighbors (entry) `(first  ,entry))
+(defmacro zombies   (entry) `(second ,entry))
+(defmacro expected  (entry) `(third  ,entry))
+(defmacro total     (entry) `(third  ,entry))
+
 (defun process-data (input-stream)
   (destructuring-bind (nodes edges steps)
       (read-numbers-from-string (read-line input-stream nil))
     (let ((table (make-hash-table :test #'equal :size nodes)))
-      ;; (format t "~%nodes=~a~%edges=~a~%steps=~a~%" nodes edges steps)
-      (dotimes (i nodes) (setf [table i] {:zombies 0 :expected 0 :neighbors '() :neighbors-count 0}))
+      (dotimes (i nodes) (setf [table i] (list () 0 0)))
 
       ;; get edges
       (do ((counter 1 (incf counter)))
           ((> counter edges))
         (let ((pair (read-numbers-from-string (read-line input-stream nil))))
-          (push (list (second pair) 0) [[table (first  pair)]  :neighbors])
-          (incf [[table (first  pair)]  :neighbors-count])
-          (push (list (first  pair) 0) [[table (second pair)]  :neighbors])
-          (incf [[table (second pair)]  :neighbors-count])))
+          (push (list (second pair) 0) (neighbors [table (first  pair)]))
+          (incf (total [table (first  pair)]))
+          (push (list (first  pair) 0) (neighbors [table (second pair)]))
+          (incf (total [table (second pair)]))))
 
       ;; get nodes
       (do ((counter 0 (incf counter)))
           ((>= counter nodes))
-        (setf [[table counter] :zombies] (read-from-string (read-line input-stream nil))))
+        (setf (zombies [table counter]) (read-from-string (read-line input-stream nil))))
 
       ;; update table
       (maphash #'(lambda (key value)
                    (declare (ignore key))
-                   (loop :for entry :in [value :neighbors]
-                      :do (setf (second entry) (/ 1 [[table (first entry)] :neighbors-count]))))
+                   (loop :for entry :in (neighbors value)
+                      :do (setf (second entry) (/ 1 (total [table (first entry)])))))
                table)
       
       ;; run simulation
@@ -99,16 +103,16 @@
       (destructuring-bind (a1 a2 a3 a4 a5)
           (map 'list #'round (subseq (q-sort (loop :for key :being the :hash-keys of table
                                                 :using (hash-value node)
-                                                :collect [node :expected])) 0 5))
+                                                :collect (expected node))) 0 5))
         (format *standard-output* "~a ~a ~a ~a ~a~%" a1 a2 a3 a4 a5)
         (force-output *standard-output*)))))
 
 (defun calc-expectations (table)
   (declare (hash-table table))
   (maphash #'(lambda (key node)
-               (declare (ignore key) (hash-table node))
-               (setf [node :expected] (loop :for (n p) :in [node :neighbors]
-                                         :sum (* [[table n] :zombies] p))))
+               (declare (ignore key) (list node))
+               (setf (expected node) (loop :for (n p) :in (neighbors node)
+                                        :sum (* (zombies [table n]) p))))
            table))
 
 (defun simulate (table ntimes)
@@ -120,8 +124,8 @@
       (calc-expectations table)
       (maphash #'(lambda (node content)
                    (declare (ignore node))
-                   (push (abs (- [content :expected] [content :zombies])) diffs)
-                   (setf [content :zombies] [content :expected]))
+                   (push (abs (- (expected content) (zombies content))) diffs)
+                   (setf (zombies content) (expected content)))
                table)
       (when (< (reduce #'max diffs) 1/10) (return)))))
 
@@ -138,4 +142,4 @@
                      (decf test-count)))
         ((= test-count 0))
       (declare (integer test-count))
-      (process-data in)))))
+      (process-data in))))
