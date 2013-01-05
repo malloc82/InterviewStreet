@@ -108,9 +108,7 @@
                                                 :using (hash-value node)
                                                 :collect (expected node))) 0 5))
         (format *standard-output* "~a ~a ~a ~a ~a~%" a1 a2 a3 a4 a5)
-        (force-output *standard-output*))
-      ;; (format *standard-output* "~a ~a ~a ~a ~a~%" 1 2 3 4 5)
-      )))
+        (force-output *standard-output*)))))
 
 (defun calc-expectations (table)
   (declare (hash-table table))
@@ -140,3 +138,11 @@
       ((= test-count 0))
     (declare (integer test-count))
     (process-data *standard-input*)))
+
+(defun test (filename)
+  (with-open-file (in filename :direction :input)
+    (do ((test-count (read-from-string (read-line in nil))
+                     (decf test-count)))
+        ((= test-count 0))
+      (declare (integer test-count))
+      (process-data in))))
