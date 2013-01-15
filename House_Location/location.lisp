@@ -24,6 +24,72 @@
   (sqrt (+ (expt (- (location-x a) (location-x b)) 2)
            (expt (- (location-y a) (location-y b)) 2))))
 
+(defmacro eval-formula1 (expr)
+  (cond
+    ((atom expr)
+     expr)
+    ((or (equal (first expr) 'expt)
+         (equal (first expr) 'sqrt))
+     expr)
+    ((and (listp expr) (= (length expr) 1))
+     `(eval-formula ,(first expr)))
+    (t `(,(second expr) ,(first expr) (eval-formula ,(cddr expr))))))
+
+(defmacro eval-formula (expr)
+  (let ((operands   '())
+        (operators  '())
+        (precedence '((* /) (+ -))))
+    (cond
+      ((atom expr) expr)
+      ((equal (first expr) 'sqrt)
+       `(sqrt (eval-formula ,(second expr))))
+      ((equal (first expr) 'expt)
+       `(expt (eval-formula ,(second expr)) (eval-formula ,(third expr))))
+      ((= (length expr) 1)
+       `(eval-formula ,(first expr)))
+      (t (loop
+            :for (token op) :on expr :by #'cddr
+            :if (null op)
+            :do (return
+                  ;; can do one call with more than two arguments if possible
+                  (loop
+                     :initially (push `(eval-formula ,token) operands)
+                     :while operators
+                     :do (push (loop :with result = `(,(pop operators) ,(pop operands) ,(pop operands))
+                                  :while (equal (first operators) (first result))
+                                  :do (progn
+                                        (pop operators)
+                                        (nconc result (list (pop operands))))
+                                  :finally (return result))
+                               operands)
+                     :finally (return (first operands)))
+
+                  ;; ;; Work but will not take advantage that op functions can take
+                  ;; ;; more than two arguments
+                  ;; (loop
+                  ;;    :initially (push token operands)
+                  ;;    :for op :in operators
+                  ;;    :do (push `(,(pop operators) ,(pop operands) ,(pop operands)) operands)
+                  ;;    :finally (return (first operands)))
+                  )
+            :do (progn
+                  (push `(eval-formula ,token) operands)
+                  (if (null operators)
+                      (push op operators)
+                      (loop :for group :in precedence
+                          :do (let ((incoming (member op group))
+                                    (top      (member (first operators) group)))
+                                (cond
+                                  (incoming
+                                   (push op operators)
+                                   (return))
+                                  ((and (not incoming) top)
+                                   (push (list (pop operators)
+                                               `(eval-formula ,(pop operands))
+                                               `(eval-formula ,(pop operands))) operands)
+                                   (push op operators)
+                                   (return))))))))))))
+
 
 (defun calculate-location (a b kimberly bob jack janet)
   (let* ((1/a^2 (/ 1 (expt a 2)))
